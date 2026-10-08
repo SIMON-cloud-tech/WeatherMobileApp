@@ -25,7 +25,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Create local.properties with API key
-        run: echo "OPEN_WEATHER_API_KEY=${{ secrets.OPEN_WEATHER_API_KEY }}" > local.properties
+        run: |
+          if [ -z "${{ secrets.OPEN_WEATHER_API_KEY }}" ]; then
+            echo "::error::OPEN_WEATHER_API_KEY secret is not set"
+            exit 1
+          fi
+          echo "OPEN_WEATHER_API_KEY=${{ secrets.OPEN_WEATHER_API_KEY }}" > local.properties
 
       - name: Make gradlew executable
         run: chmod +x gradlew
