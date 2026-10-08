@@ -53,7 +53,6 @@ android {
 }
 
 dependencies {
-    import java.util.Properties
 
             plugins {
                 alias(libs.plugins.android.application)
