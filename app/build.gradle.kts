@@ -47,9 +47,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+    // ❌ kotlinOptions block removed — not valid in Kotlin 2.0+
 
     buildFeatures {
         compose = true
