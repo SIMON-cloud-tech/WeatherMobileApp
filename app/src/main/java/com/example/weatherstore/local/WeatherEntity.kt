@@ -1,7 +1,7 @@
 
 package com.example.weatherstore.local
-import android.room.Entity
-import android.room.PrimaryKey
+import androidx.room.Entity
+import androidx.room.PrimaryKey  
 
 @Entity(tableName="weather_readings") //@Entity
 // used to define the table onto which our translated data goes into
