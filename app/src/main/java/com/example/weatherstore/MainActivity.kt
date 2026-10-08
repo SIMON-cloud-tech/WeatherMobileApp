@@ -1,34 +1,41 @@
 package com.example.weatherstore
 
 import android.os.Bundle
-import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.lifecycle.lifecycleScope
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
 import com.example.weatherstore.local.AppDatabase
 import com.example.weatherstore.network.RetrofitInstance
 import com.example.weatherstore.repository.WeatherRepository
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import com.example.weatherstore.ui.WeatherScreen
+import com.example.weatherstore.viewmodel.WeatherViewModel
 
 class MainActivity : ComponentActivity() {
+
+    // "by viewModels" asks Android for the ViewModel instead of creating it ourselves.
+    // The factory is only needed because WeatherViewModel has a constructor parameter,
+    // which Android doesn't know how to fill in on its own.
+    private val viewModel: WeatherViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                // Same chain as before: database -> repository -> ViewModel.
+                val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "weather-db").build()
+                val repository = WeatherRepository(RetrofitInstance.api, db.weatherDao())
+                return WeatherViewModel(repository) as T
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "weather-db").build()
-        val repository = WeatherRepository(RetrofitInstance.api, db.weatherDao())
-
-        lifecycleScope.launch {
-            try {
-                repository.fetchAndStore("Nairobi")
-                val rows = db.weatherDao().getAll().first()   // read back from Room
-                val latest = rows.first()
-                val message = "Stored ${rows.size} row(s). Latest: ${latest.city}, ${latest.temperature}°C, ${latest.description}"
-                Log.d("WeatherTest", message)
-                Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Log.e("WeatherTest", "Failed", e)
-                Toast.makeText(this@MainActivity, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
+        setContent {
+            MaterialTheme {
+                WeatherScreen(viewModel) // hand the ViewModel to the screen
             }
         }
     }
