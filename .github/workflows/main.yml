@@ -35,11 +35,46 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      - name: Debug — show source tree
+        run: |
+          echo "=== PWD ==="
+          pwd
+          echo "=== Repo root ==="
+          ls -la
+          echo "=== app/ ==="
+          ls -la app/
+          echo "=== app/build.gradle.kts exists? ==="
+          ls -la app/build.gradle.kts
+          echo "=== Kotlin source files ==="
+          find app/src/main/java -name "*.kt" | sort
+          echo "=== gradle.properties ==="
+          cat gradle.properties 2>/dev/null || echo "(missing)"
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew clean assembleDebug --no-build-cache --rerun-tasks --info 2>&1 | tee /tmp/build.log
+
+      - name: Show Kotlin compile summary
+        if: always()
+        run: |
+          echo "=== Tasks that ran ==="
+          grep -E "^> Task :app:" /tmp/build.log || echo "(no app tasks found)"
+          echo
+          echo "=== Kotlin source files seen by compiler ==="
+          grep -A 40 "Kotlin source files" /tmp/build.log | head -60 || echo "(compiler source list not printed)"
+          echo
+          echo "=== Compile errors ==="
+          grep -E "^e: " /tmp/build.log || echo "(no compile errors)"
+          echo
+          echo "=== NO-SOURCE / UP-TO-DATE warnings ==="
+          grep -E "NO-SOURCE|UP-TO-DATE" /tmp/build.log | grep ":app:" || echo "(none)"
+          echo
+          echo "=== Class output check ==="
+          find app/build -name "MainActivity*.class" 2>/dev/null || echo "(no MainActivity.class produced!)"
 
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: weatherstore-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
