@@ -35,6 +35,10 @@ class WeatherRepository(
     // Edits made from the UI: overwrites the row whose id matches.
     suspend fun updateReading(reading: WeatherEntity) = dao.update(reading)
 
-    // Lets the ViewModel read what is stored, without knowing Room exists
+    // Lets the ViewModel read what is stored, without knowing Room exists.
     fun getStoredReadings(): Flow<List<WeatherEntity>> = dao.getAll()
+
+    // NEW — filter stream the ViewModel subscribes to when the user types.
+    fun getReadingsForCity(city: String): Flow<List<WeatherEntity>> =
+        dao.getReadingsForCity(city)
 }
