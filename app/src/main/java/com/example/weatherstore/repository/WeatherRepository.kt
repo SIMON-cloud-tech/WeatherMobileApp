@@ -32,6 +32,9 @@ class WeatherRepository(
         if (existing == null) dao.insert(entity) else dao.update(entity)
     }
 
+    // Edits made from the UI: overwrites the row whose id matches.
+    suspend fun updateReading(reading: WeatherEntity) = dao.update(reading)
+
     // Lets the ViewModel read what is stored, without knowing Room exists
     fun getStoredReadings(): Flow<List<WeatherEntity>> = dao.getAll()
 }
