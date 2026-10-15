@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,7 +30,10 @@ import java.util.Locale
 @Composable
 fun WeatherScreen(viewModel: WeatherViewModel) {
     val state by viewModel.uiState.collectAsState()
+    // What is typed in the search box. Kept here so typing never lags.
     var city by remember { mutableStateOf("") }
+    // The reading currently being edited (null = no dialog open).
+    var editing by remember { mutableStateOf<WeatherEntity?>(null) }
 
     Column(
         modifier = Modifier
@@ -38,18 +43,52 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
     ) {
         SearchBar(
             city = city,
-            onCityChange = { city = it },
+            onCityChange = {
+                city = it
+                viewModel.onQueryChange(it)       // filters the saved readings as you type
+            },
             onSearch = {
                 if (city.isNotBlank() && !state.isLoading) {
-                    viewModel.fetchWeather(city)
+                    viewModel.fetchWeather(city)  // asks the API; falls back to saved data offline
                 }
             },
             isLoading = state.isLoading
         )
 
+        // Errors and offline notices appear as a banner; saved cards stay visible below.
+        state.error?.let { message ->
+            Spacer(modifier = Modifier.height(12.dp))
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = message,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         when {
+            // Saved readings always win: they show while loading, offline, or after an error.
+            state.readings.isNotEmpty() -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(items = state.readings, key = { it.id }) { reading ->
+                        WeatherCard(reading, onEdit = { editing = reading })
+                    }
+                }
+            }
+
+            // Nothing to show yet and a fetch is running.
             state.isLoading -> {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
@@ -59,29 +98,14 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
                 }
             }
 
-            state.error != null -> {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Text(
-                        text = "Error: ${state.error}",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            state.readings.isEmpty() -> {
+            // Nothing saved and nothing typed.
+            city.isBlank() -> {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No readings yet.\nSearch a city to get started.",
+                        text = "No readings yet.\nType a city and tap search.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -89,17 +113,33 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
                 }
             }
 
+            // Something typed, but no saved city matches it.
             else -> {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    items(items = state.readings, key = { it.id }) { reading ->
-                        WeatherCard(reading)
-                    }
+                    Text(
+                        text = "No saved readings for \"$city\".\nTap search to fetch it.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }
+    }
+
+    // The edit dialog exists only while a reading is selected.
+    editing?.let { reading ->
+        EditReadingDialog(
+            reading = reading,
+            onDismiss = { editing = null },
+            onSave = { temperature, humidity, description ->
+                viewModel.editReading(reading, temperature, humidity, description)
+                editing = null
+            }
+        )
     }
 }
 
@@ -155,7 +195,7 @@ private fun SearchBar(
 }
 
 @Composable
-private fun WeatherCard(reading: WeatherEntity) {
+private fun WeatherCard(reading: WeatherEntity, onEdit: () -> Unit) {
     val time = SimpleDateFormat("dd MMM • HH:mm", Locale.getDefault())
         .format(Date(reading.timestamp))
 
@@ -201,7 +241,7 @@ private fun WeatherCard(reading: WeatherEntity) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- Detail row: humidity + timestamp ---
+            // --- Detail row: humidity + timestamp + edit button ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -213,6 +253,13 @@ private fun WeatherCard(reading: WeatherEntity) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                IconButton(onClick = onEdit) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit reading",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -233,4 +280,68 @@ private fun DetailChip(label: String, value: String) {
             fontWeight = FontWeight.SemiBold
         )
     }
+}
+
+@Composable
+private fun EditReadingDialog(
+    reading: WeatherEntity,
+    onDismiss: () -> Unit,
+    onSave: (Double, Int, String) -> Unit
+) {
+    // Each box keeps its own typing state, starting from the card's current values.
+    var tempText by remember { mutableStateOf(reading.temperature.toString()) }
+    var humidityText by remember { mutableStateOf(reading.humidity.toString()) }
+    var description by remember { mutableStateOf(reading.description) }
+
+    // toDoubleOrNull / toIntOrNull give null when the text isn't a number.
+    val temperature = tempText.toDoubleOrNull()
+    val humidity = humidityText.toIntOrNull()
+    val isValid = temperature != null && humidity != null &&
+        humidity in 0..100 && description.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit ${reading.city}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = tempText,
+                    onValueChange = { tempText = it },
+                    label = { Text("Temperature (°C)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = humidityText,
+                    onValueChange = { humidityText = it },
+                    label = { Text("Humidity (%)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = isValid,
+                onClick = {
+                    if (temperature != null && humidity != null) {
+                        onSave(temperature, humidity, description.trim())
+                    }
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
