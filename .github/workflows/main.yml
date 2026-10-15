@@ -21,17 +21,16 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      # ❌ REMOVED: setup-gradle@v4 (which is what caches the build)
-
       - name: Wipe all Gradle caches on runner
         run: |
           rm -rf ~/.gradle/caches
           rm -rf ~/.gradle/wrapper
           rm -rf ~/.gradle/build-scan-data
           rm -rf ~/.gradle/daemon
+          rm -rf ~/.gradle/native
           rm -rf .gradle
-          rm -rf app/build
           rm -rf build
+          rm -rf app/build
           echo "Caches wiped"
 
       - name: Create local.properties with API key
@@ -45,27 +44,36 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Debug — show source tree on runner
-        run: |
-          echo "=== PWD ==="
-          pwd
-          echo "=== app/src/main/java files ==="
-          find app/src/main/java -name "*.kt" | sort
+      - name: Debug — show source tree
+        run: find app/src/main/java -name "*.kt" | sort
 
-      - name: Build debug APK (no cache)
-        run: ./gradlew clean assembleDebug --no-build-cache --rerun-tasks --info 2>&1 | tee /tmp/build.log
+      - name: Build debug APK
+        run: ./gradlew clean assembleDebug --no-build-cache --rerun-tasks 2>&1 | tee /tmp/build.log
 
-      - name: Show Kotlin compile diagnostics
+      - name: Diagnostics — dump compile results
         if: always()
         run: |
           echo "=== App tasks ==="
           grep -E "^> Task :app:" /tmp/build.log || echo "(none)"
           echo
-          echo "=== Compile errors ==="
+          echo "=== Compile errors (e:) ==="
           grep -E "^e: " /tmp/build.log || echo "(none)"
+          echo
+          echo "=== Warnings (w:) ==="
+          grep -E "^w: " /tmp/build.log | head -30 || echo "(none)"
           echo
           echo "=== MainActivity.class produced? ==="
           find app/build -name "MainActivity*.class" 2>/dev/null || echo "(NO — MainActivity was not compiled!)"
+          echo
+          echo "=== APK produced? ==="
+          find app/build/outputs -name "*.apk" 2>/dev/null || echo "(NO APK!)"
+
+      - name: Fail if APK missing
+        run: |
+          if ! ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
+            echo "::error::Build succeeded but no APK was produced. Check the compile errors above."
+            exit 1
+          fi
 
       - name: Upload APK
         if: always()
@@ -73,4 +81,4 @@ jobs:
         with:
           name: weatherstore-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
