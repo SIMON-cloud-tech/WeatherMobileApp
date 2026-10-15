@@ -28,4 +28,10 @@ interface WeatherDao {
     @Query("SELECT * FROM weather_readings ORDER BY timestamp DESC")
     // Every saved row, newest first, as a live Flow that re-emits whenever the table changes.
     fun getAll(): Flow<List<WeatherEntity>>
+
+    // NEW — filtered, partial-match query that stays live.
+    // The '%' || :city || '%' builds a LIKE pattern like '%nai%',
+    // matching any row whose city contains the typed text (case-insensitive).
+    @Query("SELECT * FROM weather_readings WHERE city LIKE '%' || :city || '%' ORDER BY timestamp DESC")
+    fun getReadingsForCity(city: String): Flow<List<WeatherEntity>>
 }
