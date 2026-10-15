@@ -51,4 +51,37 @@ class WeatherViewModel(private val repository: WeatherRepository) : ViewModel() 
             }
         }
     }
+
+    /**
+     * Validates and commits a user edit to an existing Room row.
+     *
+     * Because `original` came from Room, it carries the row's `id`.
+     * `original.copy(...)` preserves that id, so `dao.update(...)`
+     * performs an UPDATE on that specific row rather than inserting
+     * a new one.
+     *
+     * Validation is done here (not in the UI) so any caller — dialog,
+     * tests, future features — gets consistent rules.
+     */
+    fun editReading(
+        original: WeatherEntity,
+        temperature: Double,
+        humidity: Int,
+        description: String
+    ) {
+        if (humidity !in 0..100 || description.isBlank()) {
+            error.value = "Humidity must be 0–100 and the description can't be empty"
+            return
+        }
+
+        viewModelScope.launch {
+            repository.updateReading(
+                original.copy(
+                    temperature = temperature,
+                    humidity = humidity,
+                    description = description.trim()
+                )
+            )
+        }
+    }
 }
