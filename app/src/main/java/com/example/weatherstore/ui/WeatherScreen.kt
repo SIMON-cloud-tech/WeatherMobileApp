@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -27,29 +28,34 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// The screen only DRAWS state and REPORTS taps. It never touches Room or Retrofit:
+// every real decision is delegated to the ViewModel.
 @Composable
 fun WeatherScreen(viewModel: WeatherViewModel) {
+    // Subscribes to the ViewModel's state; Compose redraws whenever a new value arrives.
     val state by viewModel.uiState.collectAsState()
     // What is typed in the search box. Kept here so typing never lags.
     var city by remember { mutableStateOf("") }
-    // The reading currently being edited (null = no dialog open).
+    // The reading being edited (null = no edit dialog open).
     var editing by remember { mutableStateOf<WeatherEntity?>(null) }
+    // The reading waiting for delete confirmation (null = no dialog open).
+    var deleting by remember { mutableStateOf<WeatherEntity?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .safeDrawingPadding()
+            .safeDrawingPadding() // keeps content clear of the status and navigation bars
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         SearchBar(
             city = city,
             onCityChange = {
                 city = it
-                viewModel.onQueryChange(it)       // filters the saved readings as you type
+                viewModel.onQueryChange(it)       // READ: filters the saved readings as you type
             },
             onSearch = {
                 if (city.isNotBlank() && !state.isLoading) {
-                    viewModel.fetchWeather(city)  // asks the API; falls back to saved data offline
+                    viewModel.fetchWeather(city)  // CREATE/UPDATE: asks the API; falls back to saved data offline
                 }
             },
             isLoading = state.isLoading
@@ -75,6 +81,7 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // The first matching branch wins, so the order matters.
         when {
             // Saved readings always win: they show while loading, offline, or after an error.
             state.readings.isNotEmpty() -> {
@@ -82,8 +89,14 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
+                    // key = id gives every row a stable identity, so after an update or delete
+                    // Compose reuses the matching cards instead of redrawing the whole list.
                     items(items = state.readings, key = { it.id }) { reading ->
-                        WeatherCard(reading, onEdit = { editing = reading })
+                        WeatherCard(
+                            reading = reading,
+                            onEdit = { editing = reading },     // opens the edit dialog
+                            onDelete = { deleting = reading }   // opens the delete confirmation
+                        )
                     }
                 }
             }
@@ -130,7 +143,7 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
         }
     }
 
-    // The edit dialog exists only while a reading is selected.
+    // UPDATE: the edit dialog exists only while a reading is selected.
     editing?.let { reading ->
         EditReadingDialog(
             reading = reading,
@@ -138,6 +151,28 @@ fun WeatherScreen(viewModel: WeatherViewModel) {
             onSave = { temperature, humidity, description ->
                 viewModel.editReading(reading, temperature, humidity, description)
                 editing = null
+            }
+        )
+    }
+
+    // DELETE: ask first, because a delete can't be undone.
+    deleting?.let { reading ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete ${reading.city}?") },
+            text = { Text("This removes the saved reading from your device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteReading(reading)
+                    deleting = null
+                }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleting = null }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -195,7 +230,12 @@ private fun SearchBar(
 }
 
 @Composable
-private fun WeatherCard(reading: WeatherEntity, onEdit: () -> Unit) {
+private fun WeatherCard(
+    reading: WeatherEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    // Room stores the time as milliseconds (a Long); this turns it into readable text.
     val time = SimpleDateFormat("dd MMM • HH:mm", Locale.getDefault())
         .format(Date(reading.timestamp))
 
@@ -241,7 +281,7 @@ private fun WeatherCard(reading: WeatherEntity, onEdit: () -> Unit) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // --- Detail row: humidity + timestamp + edit button ---
+            // --- Detail row: humidity + timestamp + edit and delete buttons ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -258,6 +298,13 @@ private fun WeatherCard(reading: WeatherEntity, onEdit: () -> Unit) {
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit reading",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete reading",
+                        tint = MaterialTheme.colorScheme.error // red hints that this is destructive
                     )
                 }
             }
@@ -328,7 +375,7 @@ private fun EditReadingDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = isValid,
+                enabled = isValid, // Save stays disabled until all three fields are valid
                 onClick = {
                     if (temperature != null && humidity != null) {
                         onSave(temperature, humidity, description.trim())
